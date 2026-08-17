@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自选股云端管理后台</title>
+    <style>
+        body { font-family: -apple-system, system-ui, sans-serif; background: #f0f2f5; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 80vh; }
+        .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); width: 100%; max-width: 460px; box-sizing: border-box; }
+        h2 { color: #1a1a1a; margin-top: 0; font-size: 22px; display: flex; align-items: center; gap: 8px; }
+        label { font-weight: 600; display: block; margin-bottom: 8px; color: #444; font-size: 14px; }
+        textarea, input[type="password"] { width: 100%; padding: 12px; border: 1px solid #dcdfe6; border-radius: 8px; box-sizing: border-box; font-size: 16px; transition: all 0.3s; background: #fafafa; }
+        textarea:focus, input[type="password"]:focus { border-color: #0070f3; outline: none; background: #fff; }
+        textarea { height: 140px; resize: vertical; font-family: monospace; }
+        button { background: #0070f3; color: white; border: none; padding: 14px; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 18px; font-weight: bold; width: 100%; transition: background 0.2s; }
+        button:hover { background: #0051cb; }
+        button:disabled { background: #a0cfff; cursor: not-allowed; }
+        .alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; display: none; line-height: 1.4; }
+        .success { background: #e6fffa; color: #006d5b; border: 1px solid #b2f5ea; }
+        .error { background: #fff5f5; color: #e53e3e; border: 1px solid #fed7d7; }
+        .hint { font-size: 13px; color: #666; margin-top: 8px; line-height: 1.5; }
+        .status-bar { font-size: 13px; color: #888; background: #f5f7fa; padding: 8px 12px; border-radius: 6px; margin-bottom: 20px; display: flex; justify-content: space-between; }
+        #login-view { display: block; }
+        #main-view { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="login-view" class="card">
+        <h2>🔒 访问受限</h2>
+        <p class="hint" style="margin-bottom: 20px;">请输入管理密码以载入自选股配置</p>
+        <div id="login-alert" class="alert error"></div>
+        <label for="password-input">访问密码：</label>
+        <input type="password" id="password-input" placeholder="输入密码后按回车" onkeydown="if(event.keyCode==13) verifyPassword()">
+        <button onclick="verifyPassword()">解锁后台</button>
+    </div>
+
+    <div id="main-view" class="card">
+        <h2>📈 自选股管理后台</h2>
+        <div class="status-bar">
+            <span>目标: GitHub Actions 云端</span>
+            <span id="status-text" style="color: #67c23a;">● 已连接</span>
+        </div>
+        <div id="main-alert" class="alert"></div>
+        <label for="stock-list">股票代码列表：</label>
+        <textarea id="stock-list" placeholder="例如: 600519,hk00700,AAPL"></textarea>
+        <p class="hint">
+            💡 <b>操作指南：</b><br>
+            1. 多个股票代码请用英文逗号 <code>,</code> 隔开。<br>
+            2. 想要删除某只股票，直接在这里删掉它的代码即可。<br>
+            3. 修改完成后点击下方保存，今晚复盘将自动生效。
+        </p>
+        <button id="save-btn" onclick="saveStocks()">💾 保存修改并同步到云端</button>
+    </div>
+
+    <script>
+        // ----------------- ⚙️ 配置中转 API -----------------
+        // 【已隐藏所有密钥】只需填入你在 Cloudflare 获取的 Workers 网址
+        const WORKER_URL = "https://dailystockanalysis.aj2024.workers.dev/"; 
+        // ---------------------------------------------------
+
+        let USER_PASSWORD = ""; 
+
+        function verifyPassword() {
+            USER_PASSWORD = document.getElementById('password-input').value;
+            if (!USER_PASSWORD) return;
+
+            document.getElementById('login-view').style.display = 'none';
+            document.getElementById('main-view').style.display = 'block';
+            fetchStocks();
+        }
+
+        function showMainAlert(msg, isSuccess) {
+            const alertBox = document.getElementById('main-alert');
+            alertBox.innerText = msg;
+            alertBox.className = `alert ${isSuccess ? 'success' : 'error'}`;
+            alertBox.style.display = 'block';
+        }
+
+        // 从 Cloudflare 读取数据
+        async function fetchStocks() {
+            const listInput = document.getElementById('stock-list');
+            const statusText = document.getElementById('status-text');
+            try {
+                const response = await fetch(WORKER_URL, {
+                    method: 'GET',
+                    headers: { "Authorization": `Bearer ${USER_PASSWORD}` }
+                });
+                
+                if (response.status === 200) {
+                    const data = await response.json();
+                    listInput.value = data.value || "";
+                } else if (response.status === 401) {
+                    throw new Error("访问密码错误，请刷新页面重新输入。");
+                } else {
+                    throw new Error(`服务器响应异常 (状态码 ${response.status})`);
+                }
+            } catch (err) {
+                statusText.innerText = "● 连接断开";
+                statusText.style.color = "#f56c6c";
+                showMainAlert(err.message, false);
+            }
+        }
+
+        // 通过 Cloudflare 保存数据
+        async function saveStocks() {
+            const saveBtn = document.getElementById('save-btn');
+            const listInput = document.getElementById('stock-list');
+            
+            saveBtn.disabled = true;
+            saveBtn.innerText = "⚡ 正在同步到 GitHub...";
+            document.getElementById('main-alert').style.display = 'none';
+
+            let cleanedValue = listInput.value.replace(/，/g, ','); 
+            cleanedValue = cleanedValue.replace(/\s+/g, '');
+
+            try {
+                const response = await fetch(WORKER_URL, {
+                    method: 'POST',
+                    headers: { 
+                        "Authorization": `Bearer ${USER_PASSWORD}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ value: cleanedValue })
+                });
+
+                if (response.ok) {
+                    showMainAlert("✅ 修改成功！新股票列表已成功同步至 GitHub 变量。", true);
+                } else {
+                    throw new Error(`同步失败，状态码 ${response.status}`);
+                }
+            } catch (err) {
+                showMainAlert("❌ 保存失败: " + err.message, false);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerText = "💾 保存修改并同步到云端";
+            }
+        }
+    </script>
+</body>
+</html>
